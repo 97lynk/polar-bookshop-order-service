@@ -27,7 +27,9 @@ spec:
                     env:
                         -   name: BPL_JVM_THREAD_COUNT
                             value: "50"
-                        -   name: SPRING_DATASOURCE_URL
+                        -   name: SPRING_R2DBC_URL
+                            value: r2dbc:postgresql://polar-postgres:5432/polardb_order
+                        -   name: SPRING_FLYWAY_URL
                             value: jdbc:postgresql://polar-postgres/polardb_order
                         -   name: SPRING_CLOUD_CONFIG_URI
                             value: http://config-service
