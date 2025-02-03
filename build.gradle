@@ -59,6 +59,7 @@ tasks.named('test') {
 
 dependencyManagement {
     imports {
+        mavenBom "org.testcontainers:testcontainers-bom:${testcontainersVersion}"
         mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
     }
 }
