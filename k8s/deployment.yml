@@ -5,7 +5,7 @@ metadata:
     labels:
         app: order-service
 spec:
-    replicas: 2
+    replicas: 1
     selector:
         matchLabels:
             app: order-service
@@ -23,7 +23,7 @@ spec:
                             exec:
                                 command: [ "sh", "-c", "sleep 5" ]
                     ports:
-                        -   containerPort: 9001
+                        -   containerPort: 9002
                     env:
                         -   name: BPL_JVM_THREAD_COUNT
                             value: "50"
@@ -33,3 +33,11 @@ spec:
                             value: jdbc:postgresql://polar-postgres/polardb_order
                         -   name: SPRING_CLOUD_CONFIG_URI
                             value: http://config-service
+                        -   name: SPRING_RABBITMQ_HOST
+                            value: polar-rabbitmq
+                        -   name: SPRING_RABBITMQ_PORT
+                            value: "5672"
+                        -   name: SPRING_RABBITMQ_USERNAME
+                            value: user
+                        -   name: SPRING_RABBITMQ_PASSWORD
+                            value: password
