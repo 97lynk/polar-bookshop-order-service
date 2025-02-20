@@ -1,12 +1,17 @@
 package com.polarbookshop.orderservice;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polarbookshop.orderservice.book.Book;
 import com.polarbookshop.orderservice.book.BookClient;
+import com.polarbookshop.orderservice.config.SecurityConfig;
 import com.polarbookshop.orderservice.event.OrderAcceptedMessage;
 import com.polarbookshop.orderservice.order.domain.Order;
 import com.polarbookshop.orderservice.order.domain.OrderStatus;
 import com.polarbookshop.orderservice.web.OrderRequest;
+import dasniko.testcontainers.keycloak.KeycloakContainer;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,9 +19,13 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.cloud.stream.binder.test.OutputDestination;
 import org.springframework.cloud.stream.binder.test.TestChannelBinderConfiguration;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.function.BodyInserters;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -29,12 +38,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestChannelBinderConfiguration.class)
+@Import({TestChannelBinderConfiguration.class, SecurityConfig.class})
 @Testcontainers
 class OrderServiceApplicationTests {
 
+    private static KeycloakToken bjornTokens;
+    private static KeycloakToken isabelleTokens;
+
     @Container
     static PostgreSQLContainer<?> postgresql = new PostgreSQLContainer<>(DockerImageName.parse("postgres:14.12"));
+
+    @Container
+    static final KeycloakContainer keycloakContainer = new KeycloakContainer("quay.io/keycloak/keycloak:19.0").withRealmImportFile("test-realm-config.json");
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -54,6 +69,19 @@ class OrderServiceApplicationTests {
         registry.add("spring.r2dbc.username", postgresql::getUsername);
         registry.add("spring.r2dbc.password", postgresql::getPassword);
         registry.add("spring.flyway.url", postgresql::getJdbcUrl);
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri",
+                () -> keycloakContainer.getAuthServerUrl() + "realms/PolarBookshop");
+    }
+
+    @BeforeAll
+    static void generateAccessTokens() {
+        WebClient webClient = WebClient.builder()
+                .baseUrl(keycloakContainer.getAuthServerUrl() + "realms/PolarBookshop/protocol/openid-connect/token")
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+                .build();
+
+        isabelleTokens = authenticateWith("isabelle", "password", webClient);
+        bjornTokens = authenticateWith("bjorn", "password", webClient);
     }
 
     private static String r2dbcUrl() {
@@ -62,12 +90,26 @@ class OrderServiceApplicationTests {
     }
 
     @Test
+    void whenGetOrdersThenReturn403() throws IOException {
+        String bookIsbn = "1234567893";
+        OrderRequest orderRequest = new OrderRequest(bookIsbn, 1);
+
+        webTestClient.post()
+                .uri("/orders")
+                .bodyValue(orderRequest)
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    @Test
     void whenGetOrdersThenReturn() throws IOException {
         String bookIsbn = "1234567893";
         Book book = new Book(bookIsbn, "Title", "Author", 9.90);
         given(bookClient.getBookByIsbn(bookIsbn)).willReturn(Mono.just(book));
         OrderRequest orderRequest = new OrderRequest(bookIsbn, 1);
-        Order expectedOrder = webTestClient.post().uri("/orders")
+        Order expectedOrder = webTestClient.post()
+                .uri("/orders")
+                .headers(httpHeaders -> httpHeaders.setBearerAuth(isabelleTokens.accessToken()))
                 .bodyValue(orderRequest)
                 .exchange()
                 .expectStatus().is2xxSuccessful()
@@ -77,6 +119,7 @@ class OrderServiceApplicationTests {
                 .isEqualTo(new OrderAcceptedMessage(expectedOrder.id()));
 
         webTestClient.get().uri("/orders")
+                .headers(httpHeaders -> httpHeaders.setBearerAuth(isabelleTokens.accessToken()))
                 .exchange()
                 .expectStatus().is2xxSuccessful()
                 .expectBodyList(Order.class).value(orders -> {
@@ -92,6 +135,7 @@ class OrderServiceApplicationTests {
         OrderRequest orderRequest = new OrderRequest(bookIsbn, 3);
 
         Order createdOrder = webTestClient.post().uri("/orders")
+                .headers(httpHeaders -> httpHeaders.setBearerAuth(isabelleTokens.accessToken()))
                 .bodyValue(orderRequest)
                 .exchange()
                 .expectStatus().is2xxSuccessful()
@@ -115,6 +159,7 @@ class OrderServiceApplicationTests {
         OrderRequest orderRequest = new OrderRequest(bookIsbn, 3);
 
         Order createdOrder = webTestClient.post().uri("/orders")
+                .headers(httpHeaders -> httpHeaders.setBearerAuth(isabelleTokens.accessToken()))
                 .bodyValue(orderRequest)
                 .exchange()
                 .expectStatus().is2xxSuccessful()
@@ -124,6 +169,30 @@ class OrderServiceApplicationTests {
         assertThat(createdOrder.bookIsbn()).isEqualTo(orderRequest.isbn());
         assertThat(createdOrder.quantity()).isEqualTo(orderRequest.quantity());
         assertThat(createdOrder.status()).isEqualTo(OrderStatus.REJECTED);
+    }
+
+
+    private static KeycloakToken authenticateWith(String username, String password, WebClient webClient) {
+        return webClient
+                .post()
+                .body(
+                        BodyInserters.fromFormData("grant_type", "password")
+                                .with("client_id", "polar-test")
+                                .with("username", username)
+                                .with("password", password)
+                )
+                .retrieve()
+                .bodyToMono(KeycloakToken.class)
+                .block();
+    }
+
+    private record KeycloakToken(String accessToken) {
+        @JsonCreator
+        private KeycloakToken(
+                @JsonProperty("access_token") final String accessToken
+        ) {
+            this.accessToken = accessToken;
+        }
     }
 
 }
