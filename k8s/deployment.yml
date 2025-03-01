@@ -16,7 +16,7 @@ spec:
             annotations:
                 prometheus.io/scrape: "true"
                 prometheus.io/path: /actuator/prometheus
-                prometheus.io/port: "9001"
+                prometheus.io/port: "9002"
         spec:
             containers:
                 -   name: order-service
@@ -51,13 +51,13 @@ spec:
                         httpGet:
                             path: /actuator/health/liveness
                             port: 9002
-                        initialDelaySeconds: 60
+                        initialDelaySeconds: 120
                         periodSeconds: 5
                     readinessProbe:
                         httpGet:
                             path: /actuator/health/readiness
                             port: 9002
-                        initialDelaySeconds: 60
+                        initialDelaySeconds: 120
                         periodSeconds: 15
                     volumeMounts:
                         -   name: order-config-volume
