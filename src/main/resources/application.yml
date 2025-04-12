@@ -12,9 +12,10 @@ spring:
     lifecycle:
         timeout-per-shutdown-phase: 15s
     config:
-        import: 'optional:configserver:'
+        import: ''
     cloud:
         config:
+            enabled: false
             fail-fast: false # In production, set to true
             retry:
                 max-attempts: 5
